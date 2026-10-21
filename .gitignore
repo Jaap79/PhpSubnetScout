@@ -1,0 +1,6 @@
+test-output/
+*.fas
+.tooling/
+dist/
+*.tmp
+*.bak
