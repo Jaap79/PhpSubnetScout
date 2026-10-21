@@ -1,6 +1,8 @@
 # Third-party notices
 
-PHP Subnet Scout is built with flat assembler 1.73.35 and its standard Windows API includes/macros by Tomasz Grysztar. The compiler is downloaded separately from https://flatassembler.net/fasmw17335.zip and is not bundled in the application or release ZIP.
+PHP Subnet Scout is built with flat assembler 1.73.35 and its standard Windows API includes/macros by Tomasz Grysztar. The unmodified official archive from https://flatassembler.net/fasmw17335.zip is retained in `third_party/` for reliable offline builds, together with its original license inside the archive. Its SHA-256 is `8ef871b369638f63d2df475a64e9f574da06b601db5a3fcb8c12654b7bcf5e81`.
+
+The compiler is not bundled in the application or portable release ZIP.
 
 The FASM license is retained below for the build-time toolchain and any applicable macro-generated material. The MIT license in this repository applies to the original PHP Subnet Scout code, not to FASM itself.
 

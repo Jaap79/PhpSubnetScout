@@ -4,3 +4,4 @@
 *.md text eol=lf
 *.yml text eol=lf
 *.ico binary
+*.zip binary

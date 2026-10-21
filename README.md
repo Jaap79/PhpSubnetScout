@@ -58,4 +58,4 @@ GitHub Actions bouwt de broncode met FASM 1.73.35 en voert dezelfde loopback-tes
 
 ## Licentie
 
-De eigen applicatiecode valt onder de [MIT License](LICENSE). De FASM-toolchain wordt apart gedownload; de bijbehorende voorwaarden staan in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+De eigen applicatiecode valt onder de [MIT License](LICENSE). De officiële FASM-toolchain staat apart in `third_party/` en wordt op SHA-256 gecontroleerd; de bijbehorende voorwaarden staan in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). De toolchain zit niet in de portable release.
