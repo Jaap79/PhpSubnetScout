@@ -76,7 +76,7 @@ public sealed class ScoutFixture : IDisposable {
     cert=new X509Certificate2(ephemeral.Export(X509ContentType.Pfx),(string)null,X509KeyStorageFlags.Exportable);
    foreach(int port in new[]{80,443,8080,4430}) {
      var listener=new TcpListener(IPAddress.Parse("127.23.45.67"),port);
-     listener.Start();listeners.Add(listener);
+     try {listener.Start();} catch(Exception ex) {throw new Exception("Loopback fixture port "+port+": "+ex.Message,ex);} listeners.Add(listener);
      Task.Run(async()=>{while(!disposed) {try{var client=await listener.AcceptTcpClientAsync(); _=Task.Run(()=>Serve(client,port));}catch{if(disposed)break;}}});
    }
  }

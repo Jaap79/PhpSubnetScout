@@ -22,6 +22,17 @@ jobs:
         run: ./scripts/setup-fasm.ps1
       - name: Build native Windows executable
         run: ./build.ps1
+      - name: Prepare isolated runner HTTP ports
+        run: |
+          Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue |
+            Where-Object LocalPort -in 80,443,8080,4430 |
+            Format-Table LocalAddress,LocalPort,OwningProcess
+          foreach ($name in @('W3SVC','WAS','HTTP')) {
+            $service = Get-Service -Name $name -ErrorAction SilentlyContinue
+            if ($service -and $service.Status -eq 'Running') {
+              Stop-Service -Name $name -Force -ErrorAction Stop
+            }
+          }
       - name: Run loopback integration tests
         run: ./tests/smoke.ps1
       - name: Package portable release
