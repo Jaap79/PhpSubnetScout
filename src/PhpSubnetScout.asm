@@ -4,6 +4,7 @@ entry start
 include 'win32ax.inc'
 
 WORKERS = 32
+PORT_COUNT = 10
 R_SIZE = 32
 R_IP = 0
 R_PORT = 4
@@ -28,10 +29,10 @@ LVM_SETEXTENDEDLISTVIEWSTYLE = 1036h
 LVM_GETHEADER = 101Fh
 
 section '.data' data readable writeable
-  appTitle db 'PHP Subnet Scout',0
+  appTitle db 'PHP Subnet Scout 1.1.0',0
   className db 'PhpSubnetScout.Main',0
   titleText db 'PHP SUBNET SCOUT',0
-  hintText db '80 / 443 / 8080 / 4430   |   32 parallelle verbindingen   |   GET /   |   IPv4',0
+  hintText db 'HTTP: 80, 81, 5000, 8000, 8008, 8080, 8081, 8888   |   HTTPS: 443, 8443   |   32 parallel',0
   cidrLabel db '&Lokaal subnet (CIDR)',0
   timeoutLabel db '&Timeout/poort (ms)',0
   scanText db '&Scannen',0
@@ -54,7 +55,7 @@ section '.data' data readable writeable
   saveFail db 'CSV opslaan mislukt. Controleer pad, vrije ruimte en schrijfrechten.',0
   exported db 'CSV opgeslagen (alle afgeronde endpoints, inclusief fouten en time-outs).',0
   detailEmpty db 'Selecteer een resultaat voor URL, detectiebewijs, TLS-instelling en ontvangen HTTP-headers.',0
-  timeoutDefault db '3000',0
+  timeoutDefault db '2000',0
   empty db 0
   editClass db 'EDIT',0
   staticClass db 'STATIC',0
@@ -105,7 +106,7 @@ section '.data' data readable writeable
   csvFilter db 'CSV-bestanden (*.csv)',0,'*.csv',0,0
   csvExt db 'csv',0
   csvName db 'php-subnet-scan.csv',0
-  agent du 'PHPSubnetScout/1.0',0
+  agent du 'PHPSubnetScout/1.1',0
   verb du 'GET',0
   rootPath du '/',0
   headerPower du 'X-Powered-By',0
@@ -116,7 +117,8 @@ section '.data' data readable writeable
   needleSession db 'PHPSESSID=',0
   darkTheme du 'DarkMode_Explorer',0
   lightTheme du 'Explorer',0
-  ports dd 80,443,8080,4430
+  ; Ten selected general-purpose web ports; rationale and sources: docs/PORT_RESEARCH.md.
+  ports dd 80,443,8080,8888,81,8443,8000,8008,5000,8081
   ; COLORREF values, mapped from jaap-design-language semantic tokens.
   paletteDark dd 001C1714h,002B2420h,00F6F4F1h,00B3A79Eh,00473C35h
   paletteLight dd 00F8F5F3h,00FCFAF8h,002A2017h,0072655Bh,00D8D0C9h
@@ -174,7 +176,7 @@ section '.data' data readable writeable
   liveWorkers dd 0
   scanStart dd 0
   scanElapsed dd 0
-  timeoutMs dd 3000
+  timeoutMs dd 2000
   workersReady dd 0
   createFailed dd 0
   preferredIndex dd 0
@@ -815,7 +817,7 @@ proc ParseCIDR uses ebx esi edi
 @@:
   mov [hostStart],edi
   mov [hostCount],edx
-  shl edx,2
+  imul edx,PORT_COUNT
   mov [total],edx
   mov esi,numberBuf
   stdcall Decimal
@@ -1155,11 +1157,11 @@ proc Worker uses ebx esi edi,param
   add ecx,[rows]
   mov [result],ecx
   mov esi,ecx
-  mov ecx,eax
-  and ecx,3
-  mov edx,[ports+ecx*4]
-  mov [esi+R_PORT],edx
-  shr eax,2
+  xor edx,edx
+  mov ecx,PORT_COUNT
+  div ecx
+  mov ecx,[ports+edx*4]
+  mov [esi+R_PORT],ecx
   add eax,[hostStart]
   mov [esi+R_IP],eax
   stdcall FormatIP,eax,addr ipbuf
@@ -1178,7 +1180,7 @@ proc Worker uses ebx esi edi,param
   mov ecx,[esi+R_PORT]
   cmp ecx,443
   je .secure
-  cmp ecx,4430
+  cmp ecx,8443
   jne .open
 .secure:
   mov eax,800000h
@@ -1467,7 +1469,7 @@ proc URL uses ebx,row,buf
   mov eax,schemeHTTP
   cmp dword [ebx+R_PORT],443
   je .tls
-  cmp dword [ebx+R_PORT],4430
+  cmp dword [ebx+R_PORT],8443
   jne .format
 .tls:
   mov eax,schemeHTTPS
@@ -1481,7 +1483,7 @@ proc TLSLabel row
   mov eax,tlsNA
   cmp dword [edx+R_PORT],443
   je .tls
-  cmp dword [edx+R_PORT],4430
+  cmp dword [edx+R_PORT],8443
   jne .done
 .tls:
   mov eax,tlsUnchecked

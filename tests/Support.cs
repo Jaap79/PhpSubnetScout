@@ -66,15 +66,16 @@ public sealed class ScoutFixture : IDisposable {
  readonly X509Certificate2 cert;
  volatile bool disposed;
  public volatile int Delay80=0;
- public volatile int Delay4430=2200;
- public int Requests80,Requests443,Requests8080,Requests4430;
+ public volatile int Delay8443=900;
+ public int Requests80,Requests443,Requests8080,Requests8443;
+ public void ResetCounts() {Requests80=0;Requests443=0;Requests8080=0;Requests8443=0;}
  public string LastError="";
  public ScoutFixture() {
    var rsa=RSA.Create(2048);
    var req=new CertificateRequest("CN=scout-fixture.invalid",rsa,HashAlgorithmName.SHA256,RSASignaturePadding.Pkcs1);
    using(var ephemeral=req.CreateSelfSigned(DateTimeOffset.Now.AddDays(-1),DateTimeOffset.Now.AddDays(1)))
     cert=new X509Certificate2(ephemeral.Export(X509ContentType.Pfx),(string)null,X509KeyStorageFlags.Exportable);
-   foreach(int port in new[]{80,443,8080,4430}) {
+   foreach(int port in new[]{80,81,443,5000,8000,8008,8080,8081,8443,8888}) {
      var listener=new TcpListener(IPAddress.Parse("127.23.45.67"),port);
      try {listener.Start();} catch(Exception ex) {throw new Exception("Loopback fixture port "+port+": "+ex.Message,ex);} listeners.Add(listener);
      Task.Run(async()=>{while(!disposed) {try{var client=await listener.AcceptTcpClientAsync(); _=Task.Run(()=>Serve(client,port));}catch{if(disposed)break;}}});
@@ -85,7 +86,7 @@ public sealed class ScoutFixture : IDisposable {
    using(client) try {
     System.IO.Stream stream=client.GetStream();
     stream.ReadTimeout=5000;stream.WriteTimeout=5000;
-    if(port==443 || port==4430) {var ssl=new SslStream(stream,false);ssl.AuthenticateAsServer(cert,false,System.Security.Authentication.SslProtocols.Tls12,false);stream=ssl;}
+    if(port==443 || port==8443) {var ssl=new SslStream(stream,false);ssl.AuthenticateAsServer(cert,false,System.Security.Authentication.SslProtocols.Tls12,false);stream=ssl;}
     using(stream) {
      var buffer=new byte[4096];var request=stream.Read(buffer,0,buffer.Length);
      if(request==0)return;
@@ -94,7 +95,8 @@ public sealed class ScoutFixture : IDisposable {
       case 80: Interlocked.Increment(ref Requests80);Thread.Sleep(Delay80);response="HTTP/1.1 200 OK\r\nServer: =SUM(1,2)\r\nX-Powered-By: PHP/8.3.1\r\n";break;
       case 443: Interlocked.Increment(ref Requests443);response="HTTP/1.1 200 OK\r\nServer: fixture\r\nSet-Cookie: theme=light\r\nSet-Cookie: PHPSESSID=abc123; HttpOnly\r\n";break;
       case 8080: Interlocked.Increment(ref Requests8080);response="HTTP/1.1 302 Found\r\nServer: nginx\r\nLocation: http://127.23.45.67:80/outside\r\n";break;
-      default: Interlocked.Increment(ref Requests4430);Thread.Sleep(Delay4430);response="HTTP/1.1 403 Forbidden\r\nServer: PHP/8.2 fixture\r\n";break;
+      case 8443: Interlocked.Increment(ref Requests8443);Thread.Sleep(Delay8443);response="HTTP/1.1 403 Forbidden\r\nServer: PHP/8.2 fixture\r\n";break;
+      default: response="HTTP/1.1 200 OK\r\nServer: fixture-extra-port\r\n";break;
      }
      response+="X-Quote: a, \"b\"\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
      var bytes=Encoding.ASCII.GetBytes(response);stream.Write(bytes,0,bytes.Length);

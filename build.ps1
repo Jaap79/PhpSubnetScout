@@ -13,6 +13,8 @@ if (!$FasmPath) {
 }
 if (!(Test-Path -LiteralPath $FasmPath)) { throw "FASM ontbreekt: $FasmPath" }
 New-Item -ItemType Directory -Force -Path "$root\dist" | Out-Null
+$outputFolder = Split-Path $Output -Parent
+if ($outputFolder) { New-Item -ItemType Directory -Force -Path $outputFolder | Out-Null }
 $previousInclude = $env:INCLUDE
 try {
     $env:INCLUDE = Join-Path (Split-Path $FasmPath) 'INCLUDE'
