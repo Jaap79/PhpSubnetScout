@@ -32,7 +32,7 @@ LVM_SETEXTENDEDLISTVIEWSTYLE = 1036h
 LVM_GETHEADER = 101Fh
 
 section '.data' data readable writeable
-  appTitle db 'PHP Subnet Scout 1.2.0',0
+  appTitle db 'PHP Subnet Scout 1.2.1',0
   className db 'PhpSubnetScout.Main',0
   titleText db 'PHP SUBNET SCOUT',0
   hintText db 'HTTP: 80, 81, 5000, 8000, 8008, 8080, 8081, 8888   |   HTTPS: 443, 8443   |   32 parallel',0

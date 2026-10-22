@@ -19,7 +19,7 @@ try {
     do {
         Start-Sleep -Milliseconds 100
         $hwnd = [ScoutUI]::Main($app.Id)
-    } until($hwnd -ne [IntPtr]::Zero -or $app.HasExited -or [DateTime]::UtcNow -gt $startupDeadline)
+    } until(($hwnd -ne [IntPtr]::Zero -and [ScoutUI]::IsWindowVisible($hwnd)) -or $app.HasExited -or [DateTime]::UtcNow -gt $startupDeadline)
     if (!$hwnd) { throw 'Geen scanner-venster voor firewalltest' }
     foreach($target in @('198.51.100.1','scout-blocked.test')) {
     [ScoutUI]::SetText([ScoutUI]::GetDlgItem($hwnd,101),$target)

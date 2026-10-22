@@ -57,7 +57,7 @@ try {
  do {
   Start-Sleep -Milliseconds 100
   $hwnd = [ScoutUI]::Main($app.Id)
- } until($hwnd -ne [IntPtr]::Zero -or $app.HasExited -or [DateTime]::UtcNow -gt $startupDeadline)
+ } until(($hwnd -ne [IntPtr]::Zero -and [ScoutUI]::IsWindowVisible($hwnd)) -or $app.HasExited -or [DateTime]::UtcNow -gt $startupDeadline)
  if(!$hwnd) { Write-Host "Startup: exited=$($app.HasExited); code=$($app.ExitCode)"; [ScoutUI]::Windows($app.Id) | Write-Host }
  Check ($hwnd -ne [IntPtr]::Zero) 'Native venster start'
  $list = [ScoutUI]::GetDlgItem($hwnd,110)
