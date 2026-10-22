@@ -9,7 +9,7 @@ $profiles = @(Get-NetFirewallProfile | Select-Object Name,Enabled)
 $ruleName = 'PhpSubnetScout-CI-' + [guid]::NewGuid().ToString('N')
 $app = $null
 try {
-    [IO.File]::AppendAllText($hostsPath,"`r`n127.0.0.1 scout-fixture.test # PHP Subnet Scout CI`r`n",[Text.Encoding]::ASCII)
+    [IO.File]::AppendAllText($hostsPath,"`r`n127.0.0.1 scout-fixture.test # PHP Subnet Scout CI`r`n198.51.100.1 scout-blocked.test # PHP Subnet Scout CI`r`n",[Text.Encoding]::ASCII)
     & "$PSScriptRoot\smoke.ps1" -Executable $Executable -FixtureName 'scout-fixture.test'
     # TEST-NET-2 is documentation space. The scoped rule prevents these test connections leaving the runner.
     Set-NetFirewallProfile -Profile Domain,Private,Public -Enabled True
@@ -18,7 +18,8 @@ try {
     Start-Sleep -Milliseconds 800
     $hwnd = [ScoutUI]::Main($app.Id)
     if (!$hwnd) { throw 'Geen scanner-venster voor firewalltest' }
-    [ScoutUI]::SetText([ScoutUI]::GetDlgItem($hwnd,101),'198.51.100.1')
+    foreach($target in @('198.51.100.1','scout-blocked.test')) {
+    [ScoutUI]::SetText([ScoutUI]::GetDlgItem($hwnd,101),$target)
     [ScoutUI]::Click($hwnd,104)
     Start-Sleep -Milliseconds 150
     $deadline = [DateTime]::UtcNow.AddSeconds(8)
@@ -38,7 +39,7 @@ try {
         if ($detail -notmatch 'Winsock 10013|WinHTTP 5 ') { throw 'Een lokale weigering is benoemd zonder de verwachte Windows-bewijscode' }
     }
     # Verify export uses the same evidence and does not mark successful ports as blocked.
-    $csvPath = Join-Path (Split-Path $PSScriptRoot) 'test-output\outbound-block.csv'
+    $csvPath = Join-Path (Split-Path $PSScriptRoot) "test-output\outbound-block-$target.csv"
     if(Test-Path -LiteralPath $csvPath) {Remove-Item -LiteralPath $csvPath}
     [ScoutUI]::Click($hwnd,106)
     $deadline = [DateTime]::UtcNow.AddSeconds(15)
@@ -52,8 +53,9 @@ try {
     [ScoutUI]::PostMessage([ScoutUI]::FindId($dialog,'Button',1),245,[IntPtr]::Zero,[IntPtr]::Zero) | Out-Null
     do {Start-Sleep -Milliseconds 100} until((Test-Path -LiteralPath $csvPath) -or [DateTime]::UtcNow -gt $deadline)
     $csv = @(Import-Csv -LiteralPath $csvPath)
-    if($csv.Count -ne 10 -or @($csv | Where-Object {$_.Target -ne '198.51.100.1' -or $_.WinsockError -ne '10013' -or $_.Result -ne 'Uitgaand lokaal geweigerd'}).Count -ne 0) {throw 'Onjuiste firewallbewijscodes in CSV'}
-    Write-Host 'PASS: Extern IPv4-doel, 10 echte lokale uitgaande blokkades en CSV-bewijs gecontroleerd'
+    if($csv.Count -ne 10 -or @($csv | Where-Object {$_.Target -ne $target -or $_.WinsockError -ne '10013' -or $_.Result -ne 'Uitgaand lokaal geweigerd'}).Count -ne 0) {throw 'Onjuiste firewallbewijscodes in CSV'}
+    Write-Host "PASS: $target, 10 echte lokale uitgaande blokkades en CSV-bewijs gecontroleerd"
+    }
 }
 finally {
     if ($app -and !$app.HasExited) { Stop-Process -Id $app.Id }

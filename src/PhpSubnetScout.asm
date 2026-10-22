@@ -1347,6 +1347,101 @@ proc QueryCookies uses ebx,request,dest
   ret
 endp
 
+; WinHTTP can lose the native error on its HTTPS path. Verify only missing
+; pre-connect failures with a bounded nonblocking TCP connection to the SAME peer.
+; Only WSAEACCES is retained; a second timeout/refusal never proves a local block.
+proc VerifyLocalDenial uses ebx esi edi,row,started
+  local wsa[512]:BYTE,ip[80]:BYTE,sa[28]:BYTE,saLen:DWORD,nonblocking:DWORD
+  local writable[2]:DWORD,exceptional[2]:DWORD,tv[2]:DWORD,bytes:DWORD,error:DWORD
+  mov esi,[row]
+  cmp [stopFlag],0
+  jne .done
+  invoke GetTickCount
+  sub eax,[started]
+  cmp eax,[timeoutMs]
+  jae .done
+  stdcall PeerText,esi,addr ip
+  cmp byte [ip],0
+  je .done
+  invoke WSAStartup,202h,addr wsa
+  test eax,eax
+  jnz .done
+  lea edi,[sa]
+  xor eax,eax
+  mov ecx,7
+  rep stosd
+  lea edi,[sa]
+  lea eax,[edi+4]
+  invoke InetPtonA,2,addr ip,eax
+  cmp eax,1
+  jne .ipv6
+  mov word [edi],2
+  mov [saLen],16
+  jmp .socket
+.ipv6:
+  lea eax,[edi+8]
+  invoke InetPtonA,23,addr ip,eax
+  cmp eax,1
+  jne .cleanupWSA
+  mov word [edi],23
+  mov [saLen],28
+.socket:
+  mov eax,[esi+R_PORT]
+  xchg al,ah
+  mov [edi+2],ax
+  movzx eax,word [edi]
+  invoke socket,eax,1,6
+  cmp eax,-1
+  je .cleanupWSA
+  mov ebx,eax
+  mov [nonblocking],1
+  invoke ioctlsocket,ebx,8004667Eh,addr nonblocking
+  test eax,eax
+  jnz .close
+  invoke SockConnect,ebx,edi,[saLen]
+  test eax,eax
+  jz .close
+  invoke WSAGetLastError
+  cmp eax,10013
+  je .denied
+  cmp eax,10035
+  jne .close
+  invoke GetTickCount
+  sub eax,[started]
+  mov ecx,[timeoutMs]
+  sub ecx,eax
+  jbe .close
+  cmp ecx,200
+  jbe @f
+  mov ecx,200
+@@:
+  imul ecx,1000
+  mov [tv],0
+  mov [tv+4],ecx
+  mov [writable],1
+  mov [writable+4],ebx
+  mov [exceptional],1
+  mov [exceptional+4],ebx
+  invoke SockSelect,0,0,addr writable,addr exceptional,addr tv
+  test eax,eax
+  jle .close
+  mov [bytes],4
+  mov [error],0
+  invoke getsockopt,ebx,0FFFFh,1007h,addr error,addr bytes
+  test eax,eax
+  jnz .close
+  cmp [error],10013
+  jne .close
+.denied:
+  mov dword [esi+R_WSA],10013
+.close:
+  invoke closesocket,ebx
+.cleanupWSA:
+  invoke WSACleanup
+.done:
+  ret
+endp
+
 proc Worker uses ebx esi edi,param
   local ctx[6]:DWORD, session:DWORD,connection:DWORD,request:DWORD,started:DWORD
   local callbackInstalled:DWORD,job:DWORD,result:DWORD,flags:DWORD,bytes:DWORD,err:DWORD,ipbuf[256]:BYTE,wideIP[256]:WORD,raw[32768]:WORD
@@ -1529,6 +1624,14 @@ proc Worker uses ebx esi edi,param
   mov eax,[err]
 .error:
   mov [esi+R_ERROR],eax
+  cmp eax,12029
+  jne @f
+  cmp dword [esi+R_WSA],0
+  jne @f
+  cmp dword [esi+R_STAGE],2
+  jae @f
+  stdcall VerifyLocalDenial,esi,[started]
+@@:
   invoke GetTickCount
   sub eax,[started]
   mov [esi+R_MS],eax
@@ -2065,7 +2168,7 @@ section '.idata' import data readable writeable
   include 'api/comctl32.inc'
   include 'api/comdlg32.inc'
   import iphlpapi,GetAdaptersInfo,'GetAdaptersInfo',GetBestInterface,'GetBestInterface'
-  import ws2,inet_addr,'inet_addr',InetPtonA,'inet_pton'
+  import ws2,inet_addr,'inet_addr',InetPtonA,'inet_pton',WSAStartup,'WSAStartup',WSACleanup,'WSACleanup',socket,'socket',ioctlsocket,'ioctlsocket',SockConnect,'connect',WSAGetLastError,'WSAGetLastError',SockSelect,'select',getsockopt,'getsockopt',closesocket,'closesocket'
   import shlwapi,StrStrIA,'StrStrIA'
   import dwmapi,DwmSetWindowAttribute,'DwmSetWindowAttribute'
   import uxtheme,SetWindowTheme,'SetWindowTheme'

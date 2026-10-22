@@ -34,6 +34,8 @@ Mislukte verbindingen zijn standaard zichtbaar in het overzicht. Als Windows een
 
 Een TCP-timeout of generieke verbindingsfout bewijst geen uitgaande firewallblokkade. Een lokale of tussenliggende firewall, firewall op de doelserver, routing en een offline host kunnen hetzelfde beeld geven. De details benoemen die onzekerheid. Een weigering, DNS-fout of fout na TCP-connectie krijgt een eigen diagnose. Succesvolle verbindingen krijgen geen extra verbindingswaarschuwing. Zie ook Microsofts documentatie over [WinHTTP-fouten](https://learn.microsoft.com/en-us/windows/win32/winhttp/error-messages), [Winsock-fouten](https://learn.microsoft.com/en-us/windows/win32/winsock/windows-sockets-error-codes-2) en de [onderliggende foutcode](https://learn.microsoft.com/en-us/windows/win32/winhttp/option-flags).
 
+Bij een mislukte TCP-verbinding waarvoor WinHTTP geen onderliggende foutcode bewaart, volgt maximaal een extra TCP-verbindingspoging naar hetzelfde waargenomen adres en dezelfde poort. Deze duurt hoogstens 200 ms, binnen het resterende timeoutbudget, en verstuurt geen HTTP-aanvraag. Alleen een expliciete lokale toegangsweigering uit die controle telt als aanvullend bewijs.
+
 ## CSV
 
 **Exporteer CSV** is beschikbaar zodra de scan klaar of gestopt is. De export bevat **alle afgeronde endpoints**, onafhankelijk van het zichtbare filter. Niet gestarte endpoints van een gestopte scan worden niet geëxporteerd.
