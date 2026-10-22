@@ -53,8 +53,12 @@ function SaveCSV([string]$name) {
 $fixture = [ScoutFixture]::new()
 $app = Start-Process $Executable -PassThru
 try {
- Start-Sleep -Milliseconds 800
- $hwnd = [ScoutUI]::Main($app.Id)
+ $startupDeadline = [DateTime]::UtcNow.AddSeconds(10)
+ do {
+  Start-Sleep -Milliseconds 100
+  $hwnd = [ScoutUI]::Main($app.Id)
+ } until($hwnd -ne [IntPtr]::Zero -or $app.HasExited -or [DateTime]::UtcNow -gt $startupDeadline)
+ if(!$hwnd) { Write-Host "Startup: exited=$($app.HasExited); code=$($app.ExitCode)"; [ScoutUI]::Windows($app.Id) | Write-Host }
  Check ($hwnd -ne [IntPtr]::Zero) 'Native venster start'
  $list = [ScoutUI]::GetDlgItem($hwnd,110)
  $detected = [ScoutUI]::Text([ScoutUI]::GetDlgItem($hwnd,101))
@@ -160,7 +164,7 @@ try {
  $fixture = [ScoutFixture]::new('127.0.0.1')
  SetField 103 '6000'; Scan $FixtureName
  SetField 103 '2000'; Scan $FixtureName
- Check ((Count) -eq 10) 'Servernaam localhost werkt op alle tien poorten'
+ Check ((Count) -eq 10) 'DNS-servernaam werkt op alle tien poorten'
  $namedRows = AllRows
  Check (@($namedRows | Where-Object {$_[2] -eq ''}).Count -eq 0) 'Alle servernaam-aanvragen ontvangen HTTP binnen het twee-secondenbudget'
  Check ($fixture.LastHost -match ('^'+[regex]::Escape($FixtureName)+'(:\d+)?$')) 'DNS-servernaam blijft in de HTTP Host-header behouden'

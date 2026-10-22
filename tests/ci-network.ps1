@@ -15,8 +15,11 @@ try {
     Set-NetFirewallProfile -Profile Domain,Private,Public -Enabled True
     New-NetFirewallRule -Name $ruleName -DisplayName $ruleName -Direction Outbound -Action Block -Profile Any -Program $Executable -Protocol TCP -RemoteAddress '198.51.100.1' | Out-Null
     $app = Start-Process $Executable -PassThru
-    Start-Sleep -Milliseconds 800
-    $hwnd = [ScoutUI]::Main($app.Id)
+    $startupDeadline = [DateTime]::UtcNow.AddSeconds(10)
+    do {
+        Start-Sleep -Milliseconds 100
+        $hwnd = [ScoutUI]::Main($app.Id)
+    } until($hwnd -ne [IntPtr]::Zero -or $app.HasExited -or [DateTime]::UtcNow -gt $startupDeadline)
     if (!$hwnd) { throw 'Geen scanner-venster voor firewalltest' }
     foreach($target in @('198.51.100.1','scout-blocked.test')) {
     [ScoutUI]::SetText([ScoutUI]::GetDlgItem($hwnd,101),$target)
