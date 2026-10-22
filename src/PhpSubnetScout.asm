@@ -5,7 +5,7 @@ include 'win32ax.inc'
 
 WORKERS = 32
 PORT_COUNT = 10
-R_SIZE = 32
+R_SIZE = 64
 R_IP = 0
 R_PORT = 4
 R_HTTP = 8
@@ -14,6 +14,9 @@ R_ERROR = 16
 R_MS = 20
 R_DETAIL = 24
 R_DONE = 28
+R_WSA = 32
+R_STAGE = 36
+R_PEER = 40
 D_SERVER = 0
 D_POWER = 256
 D_COOKIE = 768
@@ -29,11 +32,11 @@ LVM_SETEXTENDEDLISTVIEWSTYLE = 1036h
 LVM_GETHEADER = 101Fh
 
 section '.data' data readable writeable
-  appTitle db 'PHP Subnet Scout 1.1.0',0
+  appTitle db 'PHP Subnet Scout 1.2.0',0
   className db 'PhpSubnetScout.Main',0
   titleText db 'PHP SUBNET SCOUT',0
   hintText db 'HTTP: 80, 81, 5000, 8000, 8008, 8080, 8081, 8888   |   HTTPS: 443, 8443   |   32 parallel',0
-  cidrLabel db '&Lokaal subnet (CIDR)',0
+  cidrLabel db '&Doel: subnet, IP of FQDN',0
   timeoutLabel db '&Timeout/poort (ms)',0
   scanText db '&Scannen',0
   stopText db 'S&toppen',0
@@ -44,12 +47,12 @@ section '.data' data readable writeable
   tlsOff db 'TLS-controle: &uit',0
   tlsOn db 'TLS-controle: &aan',0
   filters dd filterWeb,filterPHP,filterAll
-  filterWeb db '&Filter: websites',0
+  filterWeb db '&Filter: overzicht',0
   filterPHP db '&Filter: PHP',0
-  filterAll db '&Filter: alles',0
+  filterAll db '&Filter: problemen',0
   noteText db 'PHP: header = bevestigd, PHPSESSID = indicatie. Geen signaal betekent onbekend. HTTPS gebruikt standaard geen certificaatcontrole.',0
-  readyText db 'Gereed. Alleen het opgegeven subnet wordt benaderd; redirects worden niet gevolgd.',0
-  invalidText db 'Gebruik een lokaal IPv4-subnet /16 t/m /32 (10/8, 172.16/12, 192.168/16, 169.254/16 of 127/8). Timeout: 250 t/m 30000 ms.',0
+  readyText db 'Gereed. Lokaal subnet standaard; ook externe IP-adressen en FQDN werken. Redirects blijven uit.',0
+  invalidText db 'Gebruik IPv4, IPv6, een DNS-servernaam/FQDN of een IPv4-subnet /16 t/m /32. Geen URL, poort of pad. Timeout: 250 t/m 30000 ms.',0
   detectFail db 'Geen actieve IPv4-interface gevonden. Vul zelf een lokaal CIDR-subnet in.',0
   memFail db 'Onvoldoende geheugen of Windows kan geen scanworker starten.',0
   saveFail db 'CSV opslaan mislukt. Controleer pad, vrije ruimte en schrijfrechten.',0
@@ -65,7 +68,7 @@ section '.data' data readable writeable
   monoName db 'Consolas',0
   colNames dd colIP,colPort,colHTTP,colPHP,colEvidence,colServer,colMs,colStatus
   colWidths dd 130,65,60,110,230,180,80,220
-  colIP db 'IP-adres',0
+  colIP db 'Doel',0
   colPort db 'Poort',0
   colHTTP db 'HTTP',0
   colPHP db 'PHP',0
@@ -84,29 +87,49 @@ section '.data' data readable writeable
   resultStopped db 'Afgebroken',0
   resultError db 'Netwerk/TLS-fout',0
   resultRefused db 'Geen verbinding',0
+  resultDenied db 'Uitgaand lokaal geweigerd',0
+  resultDNS db 'DNS-resolutie mislukt',0
+  resultDNSTimeout db 'DNS-timeout',0
+  resultTCPTimeout db 'TCP-timeout; oorzaak onbekend',0
+  resultTCPRefused db 'Verbinding geweigerd',0
+  resultUnreachable db 'Netwerk/doel onbereikbaar',0
+  diagOK db 0
+  diagDenied db 'Windows weigert de uitgaande verbinding. Mogelijke oorzaak: lokale firewall, endpointbeleid of toegangsbeperking. Geen specifieke firewallregel vastgesteld.',0
+  diagTCP db 'Geen TCP-verbinding tot stand gekomen. Uitgaande, tussenliggende of doelfirewall, routing en doelbereikbaarheid zijn niet van elkaar te onderscheiden zonder aanvullend bewijs.',0
+  diagRefused db 'Een TCP-weigering is ontvangen. Dit kan van de doelserver of een netwerkfilter komen; geen bewijs voor een uitgaande firewallblokkade.',0
+  diagDNS db 'De servernaam kon niet tijdig worden vertaald. Controleer naam, DNS-server, DNS-bereikbaarheid en eventuele DNS-filtering.',0
+  diagAfterConnect db 'TCP-verbinding is tot stand gekomen. De fout ontstond daarna bij TLS of HTTP; geen bewijs voor een geblokkeerde uitgaande TCP-poort.',0
+  stageNames dd stageDNS,stageConnect,stageConnected,stageHTTP,stageHeaders
+  stageDNS db 'DNS / aanvraag voorbereiden',0
+  stageConnect db 'TCP verbinden',0
+  stageConnected db 'TCP verbonden / TLS',0
+  stageHTTP db 'HTTP-aanvraag / headers',0
+  stageHeaders db 'HTTP-headers ontvangen',0
   fmtIP db '%u.%u.%u.%u',0
   fmtCIDR db '%s/%u',0
   fmtUInt db '%u',0
   fmtError db 'Fout %u',0
   fmtURL db '%s://%s:%u/',0
+  fmtURL6 db '%s://[%s]:%u/',0
+  fmtLiteral6 db '[%s]',0
   schemeHTTP db 'http',0
   schemeHTTPS db 'https',0
   fmtProgress db '%s | %u / %u endpoints | %u websites | %u PHP-signalen | %u s',0
   progressRunning db 'Scannen',0
   progressStopped db 'Gestopt',0
   progressDone db 'Klaar',0
-  fmtDetails db '%s',13,10,'Resultaat: %s | HTTP %u | %u ms | Windows-fout %u',13,10,'PHP: %s - %s',13,10,'HTTPS-certificaatcontrole: %s | redirects: uit | proxy: uit',13,10,13,10,'%s',0
+  fmtDetails db '%s',13,10,'Resultaat: %s | HTTP %u | %u ms | WinHTTP %u | Winsock %u',13,10,'Adres: %s | Fase: %s',13,10,'%s',13,10,'PHP: %s - %s',13,10,'HTTPS-certificaatcontrole: %s | redirects: uit | proxy: uit',13,10,13,10,0
   tlsChecked db 'aan',0
   tlsUnchecked db 'uit (inventarisatie; identiteit niet geverifieerd)',0
   tlsNA db 'n.v.t. (HTTP)',0
-  csvHeader db 0EFh,0BBh,0BFh,'"IP","Port","URL","HTTPStatus","PHP","Evidence","Server","XPoweredBy","Location","ElapsedMs","Result","WinHTTPError","TLSCertificateValidation","RawHeaders"',13,10,0
+  csvHeader db 0EFh,0BBh,0BFh,'"Target","IP","Port","URL","HTTPStatus","PHP","Evidence","Server","XPoweredBy","Location","ElapsedMs","Result","WinHTTPError","TLSCertificateValidation","RawHeaders","WinsockError","ConnectionStage","ConnectionDiagnostic"',13,10,0
   quote db '"',0
   comma db ',',0
   newline db 13,10,0
   csvFilter db 'CSV-bestanden (*.csv)',0,'*.csv',0,0
   csvExt db 'csv',0
   csvName db 'php-subnet-scan.csv',0
-  agent du 'PHPSubnetScout/1.1',0
+  agent du 'PHPSubnetScout/1.2',0
   verb du 'GET',0
   rootPath du '/',0
   headerPower du 'X-Powered-By',0
@@ -181,9 +204,12 @@ section '.data' data readable writeable
   createFailed dd 0
   preferredIndex dd 0
   chosenAdapter dd 0
+  scanMode dd 0 ; 0=IPv4/CIDR, 1=DNS name, 2=IPv6 literal
+  parsedMode dd 0
   icc dd 8,1
   workArea RECT
-  cidrBuf rb 80
+  cidrBuf rb 256
+  scanName rb 256
   numberBuf rb 32
   statusBuf rb 512
   detailBuf rb 70000
@@ -331,7 +357,7 @@ proc WndProc uses ebx esi edi,hwnd,message,wparam,lparam
   mov [hCIDRLabel],eax
   stdcall Control,editClass,empty,WS_CHILD or WS_VISIBLE or WS_TABSTOP or WS_BORDER or ES_AUTOHSCROLL,101
   mov [hCIDR],eax
-  invoke SendMessage,eax,EM_SETLIMITTEXT,64,0
+  invoke SendMessage,eax,EM_SETLIMITTEXT,253,0
   stdcall Control,buttonClass,detectText,WS_CHILD or WS_VISIBLE or WS_TABSTOP or BS_OWNERDRAW,102
   mov [hDetect],eax
   stdcall Control,staticClass,timeoutLabel,WS_CHILD or WS_VISIBLE,0
@@ -757,6 +783,120 @@ proc Decimal uses ebx ecx
   ret
 endp
 
+; Validate without DNS/network activity. Names are resolved asynchronously by WinHTTP.
+proc ParseTarget uses ebx esi edi
+  local address[16]:BYTE
+  mov [parsedMode],0
+  mov esi,numberBuf
+  stdcall Decimal
+  jc .bad
+  cmp byte [esi],0
+  jne .bad
+  cmp eax,250
+  jb .bad
+  cmp eax,30000
+  ja .bad
+  mov [timeoutMs],eax
+  mov esi,cidrBuf
+  xor ebx,ebx ; alphabetic/hyphen present
+.classify:
+  mov al,[esi]
+  test al,al
+  jz .kind
+  cmp al,':'
+  je .ipv6
+  cmp al,'/'
+  je .ipv4
+  cmp al,'A'
+  jb @f
+  cmp al,'Z'
+  jbe .namechar
+@@:
+  cmp al,'a'
+  jb @f
+  cmp al,'z'
+  jbe .namechar
+@@:
+  cmp al,'-'
+  jne .continue
+.namechar:
+  mov ebx,1
+.continue:
+  inc esi
+  jmp .classify
+.kind:
+  test ebx,ebx
+  jz .ipv4
+  mov esi,cidrBuf
+  xor edi,edi ; length of current DNS label
+  xor ebx,ebx ; total length
+.hostname:
+  mov al,[esi]
+  test al,al
+  jz .nameend
+  cmp al,'.'
+  je .dot
+  cmp al,'-'
+  je .hyphen
+  cmp al,'0'
+  jb .bad
+  cmp al,'9'
+  jbe .accept
+  cmp al,'A'
+  jb .bad
+  cmp al,'Z'
+  jbe .accept
+  cmp al,'a'
+  jb .bad
+  cmp al,'z'
+  ja .bad
+  jmp .accept
+.hyphen:
+  test edi,edi
+  jz .bad
+.accept:
+  inc edi
+  cmp edi,63
+  ja .bad
+  jmp .advance
+.dot:
+  test edi,edi
+  jz .bad
+  cmp byte [esi-1],'-'
+  je .bad
+  xor edi,edi
+.advance:
+  inc esi
+  inc ebx
+  cmp ebx,253
+  ja .bad
+  jmp .hostname
+.nameend:
+  test ebx,ebx
+  jz .bad
+  cmp byte [esi-1],'-'
+  je .bad
+  mov [parsedMode],1
+  jmp .single
+.ipv6:
+  invoke InetPtonA,23,cidrBuf,addr address
+  cmp eax,1
+  jne .bad
+  mov [parsedMode],2
+.single:
+  mov [hostStart],0
+  mov [hostCount],1
+  mov [total],PORT_COUNT
+  mov eax,1
+  ret
+.ipv4:
+  stdcall ParseCIDR
+  ret
+.bad:
+  xor eax,eax
+  ret
+endp
+
 proc ParseCIDR uses ebx esi edi
   mov esi,cidrBuf
   xor edi,edi
@@ -775,6 +915,9 @@ proc ParseCIDR uses ebx esi edi
   inc esi
   jmp .octet
 .prefix:
+  mov ebx,32
+  cmp byte [esi],0
+  je .unicast
   cmp byte [esi],'/'
   jne .bad
   inc esi
@@ -787,21 +930,13 @@ proc ParseCIDR uses ebx esi edi
   cmp eax,32
   ja .bad
   mov ebx,eax
+.unicast:
   mov eax,edi
   shr eax,24
-  cmp eax,10
-  je .local
-  cmp eax,127
-  je .local
-  mov eax,edi
-  shr eax,16
-  cmp eax,0C0A8h
-  je .local
-  cmp eax,0A9FEh
-  je .local
-  and eax,0FFF0h
-  cmp eax,0AC10h
-  jne .bad
+  test eax,eax
+  jz .bad
+  cmp eax,224
+  jae .bad
 .local:
   mov ecx,32
   sub ecx,ebx
@@ -819,16 +954,6 @@ proc ParseCIDR uses ebx esi edi
   mov [hostCount],edx
   imul edx,PORT_COUNT
   mov [total],edx
-  mov esi,numberBuf
-  stdcall Decimal
-  jc .bad
-  cmp byte [esi],0
-  jne .bad
-  cmp eax,250
-  jb .bad
-  cmp eax,30000
-  ja .bad
-  mov [timeoutMs],eax
   mov eax,1
   ret
 .bad:
@@ -845,6 +970,34 @@ proc FormatIP uses ebx,ip,outbuf
   movzx ebx,al
   shr eax,8
   cinvoke wsprintf,[outbuf],fmtIP,eax,ebx,ecx,edx
+  ret
+endp
+
+proc TargetText row,outbuf
+  cmp [scanMode],0
+  jne .named
+  mov eax,[row]
+  stdcall FormatIP,dword [eax+R_IP],[outbuf]
+  ret
+.named:
+  invoke lstrcpyn,[outbuf],scanName,256
+  ret
+endp
+
+; The observed peer address is separate from the entered DNS name.
+proc PeerText row,outbuf
+  mov edx,[row]
+  mov eax,[edx+R_PEER]
+  test eax,eax
+  jnz .copy
+  cmp [scanMode],1
+  je .unknown
+  stdcall TargetText,[row],[outbuf]
+  ret
+.unknown:
+  mov eax,empty
+.copy:
+  invoke lstrcpyn,[outbuf],eax,80
   ret
 endp
 
@@ -931,6 +1084,11 @@ proc FreeResults uses ebx esi
   jz @f
   invoke HeapFree,[hHeap],0,eax
 @@:
+  mov eax,[esi+R_PEER]
+  test eax,eax
+  jz @f
+  invoke HeapFree,[hHeap],0,eax
+@@:
   add esi,R_SIZE
   inc ebx
   jmp .loop
@@ -946,9 +1104,9 @@ proc BeginScan uses ebx esi
   local previousTotal:DWORD
   mov eax,[total]
   mov [previousTotal],eax
-  invoke GetWindowText,[hCIDR],cidrBuf,80
+  invoke GetWindowText,[hCIDR],cidrBuf,256
   invoke GetWindowText,[hTimeout],numberBuf,32
-  stdcall ParseCIDR
+  stdcall ParseTarget
   test eax,eax
   jz .invalid
   mov esi,[total]
@@ -957,9 +1115,12 @@ proc BeginScan uses ebx esi
   invoke SendMessage,[hList],LVM_DELETEALLITEMS,0,0
   invoke SetWindowText,[hDetail],detailEmpty
   stdcall FreeResults
+  mov eax,[parsedMode]
+  mov [scanMode],eax
+  invoke lstrcpy,scanName,cidrBuf
   mov [total],esi
   mov eax,esi
-  shl eax,5
+  shl eax,6
   invoke HeapAlloc,[hHeap],HEAP_ZERO_MEMORY,eax
   test eax,eax
   jz .mem
@@ -1020,7 +1181,8 @@ endp
 
 ; Only callback signals events. The owning worker performs all request operations.
 ; Context remains alive until HANDLE_CLOSING, including cancellation paths.
-proc HttpCallback uses ebx,handle,context,status,info,length
+proc HttpCallback uses ebx esi,handle,context,status,info,length
+  local bytes:DWORD,extended:DWORD
   mov ebx,[context]
   test ebx,ebx
   jz .done
@@ -1029,10 +1191,25 @@ proc HttpCallback uses ebx,handle,context,status,info,length
   je .closed
   cmp eax,200000h ; REQUEST_ERROR
   je .error
+  mov esi,[ebx+20]
+  cmp eax,1 ; RESOLVING_NAME
+  je .resolving
+  cmp eax,2 ; NAME_RESOLVED
+  je .connecting
+  cmp eax,4 ; CONNECTING_TO_SERVER
+  je .address
+  cmp eax,8 ; CONNECTED_TO_SERVER
+  je .connected
+  cmp eax,10h ; SENDING_REQUEST: TLS completed for HTTPS
+  je .http
   cmp eax,400000h ; SENDREQUEST_COMPLETE
-  je .signal
+  je .sent
   cmp eax,20000h ; HEADERS_AVAILABLE
   jne .done
+  mov dword [esi+R_STAGE],4
+  jmp .signal
+.sent:
+  mov dword [esi+R_STAGE],3
 .signal:
   mov [ebx+8],eax
   invoke SetEvent,dword [ebx]
@@ -1041,8 +1218,63 @@ proc HttpCallback uses ebx,handle,context,status,info,length
   mov eax,[info]
   mov eax,[eax+4]
   mov [ebx+12],eax
+  ; Extended Winsock errors are thread-local: capture them HERE, not in the worker.
+  mov [extended],0
+  mov [bytes],4
+  invoke WinHttpQueryOption,0,24,addr extended,addr bytes
+  test eax,eax
+  jz .errorSignal
+  mov eax,[extended]
+  cmp eax,10000
+  jb .errorSignal
+  cmp eax,11999
+  ja .errorSignal
+  mov esi,[ebx+20]
+  mov [esi+R_WSA],eax
+.errorSignal:
   mov dword [ebx+8],200000h
   invoke SetEvent,dword [ebx]
+  jmp .done
+.resolving:
+  mov dword [esi+R_STAGE],0
+  jmp .done
+.connecting:
+  mov dword [esi+R_STAGE],1
+  jmp .done
+.address:
+  mov dword [esi+R_STAGE],1
+  cmp [scanMode],0
+  je .done
+  cmp dword [esi+R_PEER],0
+  jne @f
+  invoke HeapAlloc,[hHeap],HEAP_ZERO_MEMORY,80
+  mov [esi+R_PEER],eax
+  test eax,eax
+  jz .done
+@@:
+  invoke WideCharToMultiByte,0,0,[info],-1,dword [esi+R_PEER],80,0,0
+  mov edx,[esi+R_PEER]
+  cmp byte [edx],'['
+  jne .done
+  lea eax,[edx+1]
+.unbracket:
+  mov cl,[eax]
+  test cl,cl
+  jz .peerEnd
+  cmp cl,']'
+  je .peerEnd
+  mov [edx],cl
+  inc edx
+  inc eax
+  jmp .unbracket
+.peerEnd:
+  mov byte [edx],0
+  jmp .done
+.connected:
+  mov dword [esi+R_STAGE],2
+  jmp .done
+.http:
+  mov dword [esi+R_STAGE],3
   jmp .done
 .closed:
   invoke SetEvent,dword [ebx+4]
@@ -1116,8 +1348,8 @@ proc QueryCookies uses ebx,request,dest
 endp
 
 proc Worker uses ebx esi edi,param
-  local ctx[4]:DWORD, session:DWORD,connection:DWORD,request:DWORD,started:DWORD
-  local callbackInstalled:DWORD,job:DWORD,result:DWORD,flags:DWORD,bytes:DWORD,err:DWORD,ipbuf[32]:BYTE,wideIP[32]:WORD,raw[32768]:WORD
+  local ctx[6]:DWORD, session:DWORD,connection:DWORD,request:DWORD,started:DWORD
+  local callbackInstalled:DWORD,job:DWORD,result:DWORD,flags:DWORD,bytes:DWORD,err:DWORD,ipbuf[256]:BYTE,wideIP[256]:WORD,raw[32768]:WORD
   mov [session],0
   mov [connection],0
   mov [request],0
@@ -1136,7 +1368,9 @@ proc Worker uses ebx esi edi,param
   mov [session],eax
   test eax,eax
   jz .exit
-  invoke WinHttpSetTimeouts,eax,[timeoutMs],[timeoutMs],[timeoutMs],[timeoutMs]
+  mov [flags],1
+  invoke WinHttpSetOption,[session],140,addr flags,4 ; IPv6 fast fallback to IPv4, Windows 10 1903+
+  invoke WinHttpSetTimeouts,[session],[timeoutMs],[timeoutMs],[timeoutMs],[timeoutMs]
 .job:
   cmp [workersReady],0
   jne @f
@@ -1153,7 +1387,7 @@ proc Worker uses ebx esi edi,param
   mov [callbackInstalled],0
   mov [job],eax
   mov ecx,eax
-  shl ecx,5
+  shl ecx,6
   add ecx,[rows]
   mov [result],ecx
   mov esi,ecx
@@ -1164,8 +1398,13 @@ proc Worker uses ebx esi edi,param
   mov [esi+R_PORT],ecx
   add eax,[hostStart]
   mov [esi+R_IP],eax
-  stdcall FormatIP,eax,addr ipbuf
-  invoke MultiByteToWideChar,0,0,addr ipbuf,-1,addr wideIP,32
+  stdcall TargetText,esi,addr ipbuf
+  cmp [scanMode],2
+  jne @f
+  cinvoke wsprintf,addr ipbuf,fmtLiteral6,scanName
+@@:
+  invoke MultiByteToWideChar,0,0,addr ipbuf,-1,addr wideIP,256
+  mov [edi+20],esi
   mov dword [edi+8],0
   mov dword [edi+12],0
   invoke ResetEvent,dword [edi]
@@ -1210,7 +1449,7 @@ proc Worker uses ebx esi edi,param
   invoke WinHttpSetOption,[request],45,addr flags,4
   test eax,eax
   jz .lastError
-  invoke WinHttpSetStatusCallback,[request],HttpCallback,620800h,0
+  invoke WinHttpSetStatusCallback,[request],HttpCallback,62083Fh,0
   cmp eax,-1
   je .lastError
   mov [callbackInstalled],1
@@ -1274,6 +1513,20 @@ proc Worker uses ebx esi edi,param
   jmp .error
 .lastError:
   invoke GetLastError
+  mov [err],eax
+  mov [flags],0
+  mov [bytes],4
+  invoke WinHttpQueryOption,0,24,addr flags,addr bytes
+  test eax,eax
+  jz @f
+  mov eax,[flags]
+  cmp eax,10000
+  jb @f
+  cmp eax,11999
+  ja @f
+  mov [esi+R_WSA],eax
+@@:
+  mov eax,[err]
 .error:
   mov [esi+R_ERROR],eax
   invoke GetTickCount
@@ -1351,10 +1604,34 @@ proc Labels uses ebx,row
   mov ecx,resultOK
   cmp dword [ebx+R_HTTP],0
   jne .done
+  cmp dword [ebx+R_ERROR],12007
+  je .dns
+  cmp dword [ebx+R_WSA],11001
+  je .dns
+  cmp dword [ebx+R_WSA],11002
+  je .dns
+  cmp dword [ebx+R_WSA],10013
+  je .denied
+  cmp dword [ebx+R_ERROR],5
+  je .denied
+  cmp dword [ebx+R_WSA],10061
+  je .refused
+  cmp dword [ebx+R_WSA],10051
+  je .unreachable
+  cmp dword [ebx+R_WSA],10065
+  je .unreachable
   mov ecx,resultError
   cmp dword [ebx+R_ERROR],12002
   jne @f
   mov ecx,resultTimeout
+  cmp dword [ebx+R_STAGE],2
+  jae @f
+  mov ecx,resultTCPTimeout
+  cmp [scanMode],1
+  jne @f
+  cmp dword [ebx+R_STAGE],0
+  jne @f
+  mov ecx,resultDNSTimeout
 @@:
   cmp dword [ebx+R_ERROR],995
   jne @f
@@ -1365,24 +1642,71 @@ proc Labels uses ebx,row
   mov ecx,resultRefused
 .done:
   ret
+.denied:
+  mov ecx,resultDenied
+  ret
+.dns:
+  mov ecx,resultDNS
+  ret
+.refused:
+  mov ecx,resultTCPRefused
+  ret
+.unreachable:
+  mov ecx,resultUnreachable
+  ret
+endp
+
+proc Diagnostic row
+  mov edx,[row]
+  mov eax,diagOK
+  cmp dword [edx+R_HTTP],0
+  jne .done
+  cmp dword [edx+R_ERROR],995
+  je .done
+  mov eax,diagDenied
+  cmp dword [edx+R_WSA],10013
+  je .done
+  cmp dword [edx+R_ERROR],5
+  je .done
+  mov eax,diagDNS
+  cmp dword [edx+R_ERROR],12007
+  je .done
+  cmp dword [edx+R_WSA],11001
+  je .done
+  cmp [scanMode],1
+  jne @f
+  cmp dword [edx+R_STAGE],0
+  je .done
+@@:
+  mov eax,diagRefused
+  cmp dword [edx+R_WSA],10061
+  je .done
+  mov eax,diagTCP
+  cmp dword [edx+R_STAGE],2
+  jb .done
+  mov eax,diagAfterConnect
+.done:
+  ret
 endp
 
 proc AddRow uses ebx esi edi,row
-  local lv:LV_ITEM,buf[64]:BYTE,index:DWORD,labelPHP:DWORD,evidence:DWORD,outcome:DWORD
+  local lv:LV_ITEM,buf[256]:BYTE,index:DWORD,labelPHP:DWORD,evidence:DWORD,outcome:DWORD
   mov esi,[row]
   cmp dword [esi+R_DONE],0
   je .done
   test dword [esi+R_DONE],2
   jnz .done
   cmp [filterMode],2
-  je .add
+  jne @f
+  cmp dword [esi+R_ERROR],0
+  je .done
+  jmp .add
+@@:
   cmp [filterMode],1
   jne @f
   cmp dword [esi+R_PHP],0
   je .done
 @@:
-  cmp dword [esi+R_HTTP],0
-  je .done
 .add:
   stdcall Labels,esi
   mov [labelPHP],eax
@@ -1394,7 +1718,7 @@ proc AddRow uses ebx esi edi,row
   mov [lv.lParam],esi
   lea eax,[buf]
   mov [lv.pszText],eax
-  stdcall FormatIP,dword [esi+R_IP],eax
+  stdcall TargetText,esi,eax
   invoke SendMessage,[hList],LVM_INSERTITEM,0,addr lv
   cmp eax,-1
   je .done
@@ -1463,9 +1787,14 @@ proc RebuildList uses ebx esi
 endp
 
 proc URL uses ebx,row,buf
-  local ip[32]:BYTE
+  local ip[256]:BYTE,formatString:DWORD
   mov ebx,[row]
-  stdcall FormatIP,dword [ebx+R_IP],addr ip
+  stdcall TargetText,ebx,addr ip
+  mov [formatString],fmtURL
+  cmp [scanMode],2
+  jne @f
+  mov [formatString],fmtURL6
+@@:
   mov eax,schemeHTTP
   cmp dword [ebx+R_PORT],443
   je .tls
@@ -1474,7 +1803,7 @@ proc URL uses ebx,row,buf
 .tls:
   mov eax,schemeHTTPS
 .format:
-  cinvoke wsprintf,[buf],fmtURL,eax,addr ip,dword [ebx+R_PORT]
+  cinvoke wsprintf,[buf],[formatString],eax,addr ip,dword [ebx+R_PORT]
   ret
 endp
 
@@ -1495,7 +1824,7 @@ proc TLSLabel row
 endp
 
 proc ShowDetails uses ebx esi,row
-  local url[128]:BYTE,php:DWORD,evidence:DWORD,outcome:DWORD,tls:DWORD
+  local url[384]:BYTE,peer[80]:BYTE,php:DWORD,evidence:DWORD,outcome:DWORD,tls:DWORD,diag:DWORD,stage:DWORD
   mov esi,[row]
   stdcall URL,esi,addr url
   stdcall Labels,esi
@@ -1504,6 +1833,12 @@ proc ShowDetails uses ebx esi,row
   mov [outcome],ecx
   stdcall TLSLabel,esi
   mov [tls],eax
+  stdcall PeerText,esi,addr peer
+  stdcall Diagnostic,esi
+  mov [diag],eax
+  mov eax,[esi+R_STAGE]
+  mov eax,[stageNames+eax*4]
+  mov [stage],eax
   mov eax,empty
   cmp dword [esi+R_DETAIL],0
   je @f
@@ -1512,7 +1847,7 @@ proc ShowDetails uses ebx esi,row
 @@:
   ; wsprintf has a 1024-byte ceiling. Use bounded header copy after a short preamble.
   push eax
-  cinvoke wsprintf,detailBuf,fmtDetails,addr url,[outcome],dword [esi+R_HTTP],dword [esi+R_MS],dword [esi+R_ERROR],[php],[evidence],[tls],empty
+  cinvoke wsprintf,detailBuf,fmtDetails,addr url,[outcome],dword [esi+R_HTTP],dword [esi+R_MS],dword [esi+R_ERROR],dword [esi+R_WSA],addr peer,[stage],[diag],[php],[evidence],[tls]
   invoke lstrlen,detailBuf
   add eax,detailBuf
   pop edx
@@ -1622,7 +1957,7 @@ proc CSVNumber val
 endp
 
 proc ExportCSV uses ebx esi edi
-  local php:DWORD,evidence:DWORD,outcome:DWORD,tls:DWORD,buf[128]:BYTE
+  local php:DWORD,evidence:DWORD,outcome:DWORD,tls:DWORD,buf[384]:BYTE
   cmp [rows],0
   je .done
   mov edi,ofn
@@ -1661,8 +1996,10 @@ proc ExportCSV uses ebx esi edi
   mov [outcome],ecx
   stdcall TLSLabel,esi
   mov [tls],eax
-  stdcall FormatIP,dword [esi+R_IP],addr buf
+  stdcall TargetText,esi,addr buf
   stdcall CSVCell,addr buf
+  stdcall PeerText,esi,addr buf
+  stdcall CSVNext,addr buf
   stdcall CSVNumber,dword [esi+R_PORT]
   stdcall URL,esi,addr buf
   stdcall CSVNext,addr buf
@@ -1692,6 +2029,11 @@ proc ExportCSV uses ebx esi edi
   jz @f
   lea eax,[edi+D_RAW]
 @@:
+  stdcall CSVNext,eax
+  stdcall CSVNumber,dword [esi+R_WSA]
+  mov eax,[esi+R_STAGE]
+  stdcall CSVNext,dword [stageNames+eax*4]
+  stdcall Diagnostic,esi
   stdcall CSVNext,eax
   stdcall WriteCSV,newline,2
 .next:
@@ -1723,11 +2065,11 @@ section '.idata' import data readable writeable
   include 'api/comctl32.inc'
   include 'api/comdlg32.inc'
   import iphlpapi,GetAdaptersInfo,'GetAdaptersInfo',GetBestInterface,'GetBestInterface'
-  import ws2,inet_addr,'inet_addr'
+  import ws2,inet_addr,'inet_addr',InetPtonA,'inet_pton'
   import shlwapi,StrStrIA,'StrStrIA'
   import dwmapi,DwmSetWindowAttribute,'DwmSetWindowAttribute'
   import uxtheme,SetWindowTheme,'SetWindowTheme'
-  import winhttp,WinHttpOpen,'WinHttpOpen',WinHttpConnect,'WinHttpConnect',WinHttpOpenRequest,'WinHttpOpenRequest',WinHttpSetOption,'WinHttpSetOption',WinHttpSetTimeouts,'WinHttpSetTimeouts',WinHttpSetStatusCallback,'WinHttpSetStatusCallback',WinHttpSendRequest,'WinHttpSendRequest',WinHttpReceiveResponse,'WinHttpReceiveResponse',WinHttpQueryHeaders,'WinHttpQueryHeaders',WinHttpCloseHandle,'WinHttpCloseHandle'
+  import winhttp,WinHttpOpen,'WinHttpOpen',WinHttpConnect,'WinHttpConnect',WinHttpOpenRequest,'WinHttpOpenRequest',WinHttpSetOption,'WinHttpSetOption',WinHttpQueryOption,'WinHttpQueryOption',WinHttpSetTimeouts,'WinHttpSetTimeouts',WinHttpSetStatusCallback,'WinHttpSetStatusCallback',WinHttpSendRequest,'WinHttpSendRequest',WinHttpReceiveResponse,'WinHttpReceiveResponse',WinHttpQueryHeaders,'WinHttpQueryHeaders',WinHttpCloseHandle,'WinHttpCloseHandle'
 
 section '.rsrc' resource data readable
   directory RT_MANIFEST,manifest,RT_ICON,icons,RT_GROUP_ICON,groupicons

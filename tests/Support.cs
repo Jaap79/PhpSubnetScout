@@ -23,6 +23,7 @@ public static class ScoutUI {
  [DllImport("user32.dll",CharSet=CharSet.Auto)] static extern int GetWindowText(IntPtr h,StringBuilder s,int n);
  [DllImport("user32.dll",CharSet=CharSet.Auto)] static extern int GetClassName(IntPtr h,StringBuilder s,int n);
  [DllImport("user32.dll")] public static extern bool IsWindowEnabled(IntPtr h);
+ [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr h);
  [DllImport("user32.dll")] public static extern bool EnumChildWindows(IntPtr h,EnumProc p,IntPtr l);
  [DllImport("user32.dll")] public static extern bool EnumWindows(EnumProc p,IntPtr l);
  [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr h,out uint pid);
@@ -43,13 +44,13 @@ public static class ScoutUI {
  public static void TypeText(IntPtr h,string text) {SendMessage(h,0xB1,IntPtr.Zero,(IntPtr)(-1));foreach(char c in text)SendMessage(h,0x102,(IntPtr)c,IntPtr.Zero);}
  public static string Class(IntPtr h) { var b=new StringBuilder(256); GetClassName(h,b,256); return b.ToString(); }
  public static string[] Children(IntPtr h) { var a=new List<string>(); EnumChildWindows(h,(x,l)=>{a.Add($"{x} | {GetDlgCtrlID(x)} | {Class(x)} | {Text(x)}");return true;},IntPtr.Zero);return a.ToArray(); }
- public static IntPtr Dialog(int pid) { IntPtr found=IntPtr.Zero; EnumWindows((x,l)=>{uint p;GetWindowThreadProcessId(x,out p); if(p==pid && Class(x)=="#32770") found=x; return true;},IntPtr.Zero);return found; }
+ public static IntPtr Dialog(int pid) { IntPtr found=IntPtr.Zero; EnumWindows((x,l)=>{uint p;GetWindowThreadProcessId(x,out p); if(p==pid && IsWindowVisible(x) && Class(x)=="#32770") found=x; return true;},IntPtr.Zero);return found; }
  public static IntPtr[] Dialogs(int pid) {var a=new List<IntPtr>();EnumWindows((x,l)=>{uint p;GetWindowThreadProcessId(x,out p);if(p==pid && Class(x)=="#32770")a.Add(x);return true;},IntPtr.Zero);return a.ToArray();}
  public static string[] Windows(int pid) { var a=new List<string>(); EnumWindows((x,l)=>{uint p;GetWindowThreadProcessId(x,out p);if(p==pid)a.Add($"{x} | {Class(x)} | {Text(x)}");return true;},IntPtr.Zero);return a.ToArray(); }
  public static IntPtr Main(int pid) { IntPtr found=IntPtr.Zero;EnumWindows((x,l)=>{uint p;GetWindowThreadProcessId(x,out p);if(p==pid && Class(x)=="PhpSubnetScout.Main")found=x;return true;},IntPtr.Zero);return found; }
  public static void Click(IntPtr h,int id) { PostMessage(h,0x111,(IntPtr)id,GetDlgItem(h,id)); }
  public static IntPtr FindChild(IntPtr h,string cls) {IntPtr found=IntPtr.Zero;EnumChildWindows(h,(x,l)=>{if(Class(x)==cls) {found=x;return false;} return true;},IntPtr.Zero);return found;}
- public static IntPtr FindId(IntPtr h,string cls,int id) {IntPtr found=IntPtr.Zero;EnumChildWindows(h,(x,l)=>{if(Class(x)==cls && GetDlgCtrlID(x)==id) {found=x;return false;} return true;},IntPtr.Zero);return found;}
+ public static IntPtr FindId(IntPtr h,string cls,int id) {IntPtr found=IntPtr.Zero;EnumChildWindows(h,(x,l)=>{if(IsWindowVisible(x) && Class(x)==cls && GetDlgCtrlID(x)==id) {found=x;return false;} return true;},IntPtr.Zero);return found;}
  public static string[] Row(int pid,IntPtr list,int index,bool select=false) {
   var result=new string[8];var p=OpenProcess(0x38,false,pid);var remote=VirtualAllocEx(p,IntPtr.Zero,(UIntPtr)4096,0x3000,4);
   if(remote==IntPtr.Zero)throw new Exception("VirtualAllocEx");
@@ -68,15 +69,16 @@ public sealed class ScoutFixture : IDisposable {
  public volatile int Delay80=0;
  public volatile int Delay8443=900;
  public int Requests80,Requests443,Requests8080,Requests8443;
+ public string LastHost="",LastSni="";
  public void ResetCounts() {Requests80=0;Requests443=0;Requests8080=0;Requests8443=0;}
  public string LastError="";
- public ScoutFixture() {
+ public ScoutFixture(string bindAddress="127.23.45.67") {
    var rsa=RSA.Create(2048);
    var req=new CertificateRequest("CN=scout-fixture.invalid",rsa,HashAlgorithmName.SHA256,RSASignaturePadding.Pkcs1);
    using(var ephemeral=req.CreateSelfSigned(DateTimeOffset.Now.AddDays(-1),DateTimeOffset.Now.AddDays(1)))
     cert=new X509Certificate2(ephemeral.Export(X509ContentType.Pfx),(string)null,X509KeyStorageFlags.Exportable);
    foreach(int port in new[]{80,81,443,5000,8000,8008,8080,8081,8443,8888}) {
-     var listener=new TcpListener(IPAddress.Parse("127.23.45.67"),port);
+     var listener=new TcpListener(IPAddress.Parse(bindAddress),port);
      try {listener.Start();} catch(Exception ex) {throw new Exception("Loopback fixture port "+port+": "+ex.Message,ex);} listeners.Add(listener);
      Task.Run(async()=>{while(!disposed) {try{var client=await listener.AcceptTcpClientAsync(); _=Task.Run(()=>Serve(client,port));}catch{if(disposed)break;}}});
    }
@@ -86,10 +88,19 @@ public sealed class ScoutFixture : IDisposable {
    using(client) try {
     System.IO.Stream stream=client.GetStream();
     stream.ReadTimeout=5000;stream.WriteTimeout=5000;
-    if(port==443 || port==8443) {var ssl=new SslStream(stream,false);ssl.AuthenticateAsServer(cert,false,System.Security.Authentication.SslProtocols.Tls12,false);stream=ssl;}
+    if(port==443 || port==8443) {
+     var ssl=new SslStream(stream,false);
+     ssl.AuthenticateAsServer(new SslServerAuthenticationOptions {
+      EnabledSslProtocols=System.Security.Authentication.SslProtocols.Tls12,
+      ServerCertificateSelectionCallback=(sender,name)=>{LastSni=name??"";return cert;}
+     });stream=ssl;
+    }
     using(stream) {
      var buffer=new byte[4096];var request=stream.Read(buffer,0,buffer.Length);
      if(request==0)return;
+     var requestText=Encoding.ASCII.GetString(buffer,0,request);
+     foreach(var line in requestText.Split(new[]{"\r\n"},StringSplitOptions.None))
+      if(line.StartsWith("Host:",StringComparison.OrdinalIgnoreCase))LastHost=line.Substring(5).Trim();
      string response;
      switch(port) {
       case 80: Interlocked.Increment(ref Requests80);Thread.Sleep(Delay80);response="HTTP/1.1 200 OK\r\nServer: =SUM(1,2)\r\nX-Powered-By: PHP/8.3.1\r\n";break;

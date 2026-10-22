@@ -33,8 +33,8 @@ jobs:
               Stop-Service -Name $name -Force -ErrorAction Stop
             }
           }
-      - name: Run loopback integration tests
-        run: ./tests/smoke.ps1
+      - name: Run loopback, FQDN and isolated outbound firewall tests
+        run: ./tests/ci-network.ps1
       - name: Package portable release
         run: |
           if ($env:GITHUB_REF_TYPE -eq 'tag') {
